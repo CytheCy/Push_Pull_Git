@@ -18,6 +18,9 @@ class GitRepoSyncApp(tk.Tk):
         self.geometry("860x620")
         self.minsize(700, 500)
         self.settings = AppSettings.load()
+        self.style = ttk.Style(self)
+        self.style.theme_use("clam")
+        self._apply_theme()
         self.repo_root = tk.StringVar(value=self.settings.repo_root)
         self.recursive = tk.BooleanVar(value=self.settings.recursive)
         self.status_text = tk.StringVar(value="Choose a folder, then scan for repositories.")
@@ -25,9 +28,100 @@ class GitRepoSyncApp(tk.Tk):
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self._busy = False
         self._build_ui()
+        self._apply_theme()
         self.after(100, self._process_events)
         if self.settings.repo_root and Path(self.settings.repo_root).is_dir():
             self.after(150, self.scan)
+
+    def _apply_theme(self) -> None:
+        dark = self.settings.appearance == "dark"
+        colors = {
+            "background": "#242424" if dark else "#f4f4f4",
+            "field": "#303030" if dark else "#ffffff",
+            "foreground": "#f2f2f2" if dark else "#202020",
+            "muted": "#b8b8b8" if dark else "#555555",
+            "button": "#3a3a3a" if dark else "#e5e5e5",
+            "active": "#4a4a4a" if dark else "#d6d6d6",
+            "border": "#5c5c5c" if dark else "#b8b8b8",
+            "selection": "#4778c7" if dark else "#2f6fda",
+            "selection_text": "#ffffff",
+        }
+        self.configure(background=colors["background"])
+        self.option_add("*Toplevel.background", colors["background"])
+        self.style.configure(
+            ".",
+            background=colors["background"],
+            foreground=colors["foreground"],
+            bordercolor=colors["border"],
+            darkcolor=colors["border"],
+            lightcolor=colors["border"],
+            troughcolor=colors["background"],
+        )
+        self.style.configure("TFrame", background=colors["background"])
+        self.style.configure(
+            "TLabel", background=colors["background"], foreground=colors["foreground"]
+        )
+        self.style.configure(
+            "TButton",
+            background=colors["button"],
+            foreground=colors["foreground"],
+            bordercolor=colors["border"],
+            focusthickness=2,
+            focuscolor=colors["selection"],
+        )
+        self.style.map(
+            "TButton",
+            background=[("active", colors["active"]), ("pressed", colors["selection"])],
+            foreground=[("disabled", colors["muted"])],
+        )
+        self.style.configure(
+            "TCheckbutton", background=colors["background"], foreground=colors["foreground"]
+        )
+        self.style.map("TCheckbutton", background=[("active", colors["background"])])
+        self.style.configure(
+            "TEntry",
+            fieldbackground=colors["field"],
+            foreground=colors["foreground"],
+            insertcolor=colors["foreground"],
+            bordercolor=colors["border"],
+        )
+        self.style.configure(
+            "TCombobox",
+            fieldbackground=colors["field"],
+            background=colors["button"],
+            foreground=colors["foreground"],
+            arrowcolor=colors["foreground"],
+            bordercolor=colors["border"],
+        )
+        self.style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", colors["field"])],
+            foreground=[("readonly", colors["foreground"])],
+            selectbackground=[("readonly", colors["field"])],
+            selectforeground=[("readonly", colors["foreground"])],
+        )
+        self.option_add("*TCombobox*Listbox.background", colors["field"])
+        self.option_add("*TCombobox*Listbox.foreground", colors["foreground"])
+        self.option_add("*TCombobox*Listbox.selectBackground", colors["selection"])
+        self.option_add("*TCombobox*Listbox.selectForeground", colors["selection_text"])
+
+        repo_list = getattr(self, "repo_list", None)
+        if repo_list is not None:
+            repo_list.configure(
+                background=colors["field"],
+                foreground=colors["foreground"],
+                selectbackground=colors["selection"],
+                selectforeground=colors["selection_text"],
+            )
+        output = getattr(self, "output", None)
+        if output is not None:
+            output.configure(
+                background=colors["field"],
+                foreground=colors["foreground"],
+                selectbackground=colors["selection"],
+                selectforeground=colors["selection_text"],
+                insertbackground=colors["foreground"],
+            )
 
     def _build_ui(self) -> None:
         container = ttk.Frame(self, padding=16)
@@ -192,6 +286,7 @@ class GitRepoSyncApp(tk.Tk):
         frame.pack(fill="both", expand=True)
         log_dir = tk.StringVar(value=self.settings.log_dir)
         template = tk.StringVar(value=self.settings.commit_template)
+        appearance = tk.StringVar(value=self.settings.appearance.title())
         ttk.Label(frame, text="Log folder").grid(row=0, column=0, sticky="w")
         ttk.Entry(frame, textvariable=log_dir, width=58).grid(row=1, column=0, sticky="ew")
         ttk.Button(
@@ -206,6 +301,16 @@ class GitRepoSyncApp(tk.Tk):
         ttk.Label(frame, text="Available fields: {date}, {day}, {repo}").grid(
             row=4, column=0, columnspan=2, sticky="w"
         )
+        ttk.Label(frame, text="Appearance").grid(
+            row=5, column=0, sticky="w", pady=(12, 0)
+        )
+        ttk.Combobox(
+            frame,
+            textvariable=appearance,
+            values=("Light", "Dark"),
+            state="readonly",
+            width=16,
+        ).grid(row=6, column=0, sticky="w")
 
         def save() -> None:
             try:
@@ -215,11 +320,17 @@ class GitRepoSyncApp(tk.Tk):
                 return
             self.settings.log_dir = log_dir.get()
             self.settings.commit_template = template.get()
+            self.settings.appearance = appearance.get().lower()
             self.settings.save()
+            self._apply_theme()
             dialog.destroy()
 
-        ttk.Button(frame, text="Cancel", command=dialog.destroy).grid(row=5, column=0, sticky="e", pady=(16, 0))
-        ttk.Button(frame, text="Save", command=save).grid(row=5, column=1, sticky="e", pady=(16, 0))
+        ttk.Button(frame, text="Cancel", command=dialog.destroy).grid(
+            row=7, column=0, sticky="e", pady=(16, 0)
+        )
+        ttk.Button(frame, text="Save", command=save).grid(
+            row=7, column=1, sticky="e", pady=(16, 0)
+        )
 
     def _choose_log_folder(self, variable: tk.StringVar) -> None:
         selected = filedialog.askdirectory(initialdir=variable.get(), parent=self)

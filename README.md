@@ -30,6 +30,9 @@ python3 main.py
 
 Choose the folder containing your repositories, click **Scan**, select the desired repositories, and use **Push selected** or **Pull selected**. Settings and logs default to `~/.git-repo-sync/`.
 
+Use **Settings… → Appearance** to switch between the light and dark themes. The choice is
+saved for future sessions.
+
 The commit template supports `{date}` (local date, time, and UTC offset), `{day}` (`YYYY-MM-DD`), and `{repo}` (folder name).
 
 ## Test

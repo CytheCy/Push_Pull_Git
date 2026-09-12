@@ -15,6 +15,7 @@ class AppSettings:
     log_dir: str = str(APP_DIR / "logs")
     commit_template: str = "Automated sync {date}"
     recursive: bool = True
+    appearance: str = "light"
 
     @classmethod
     def load(cls, path: Path = SETTINGS_FILE) -> "AppSettings":
@@ -23,7 +24,10 @@ class AppSettings:
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return cls()
         allowed = cls.__dataclass_fields__.keys()
-        return cls(**{key: value for key, value in raw.items() if key in allowed})
+        settings = cls(**{key: value for key, value in raw.items() if key in allowed})
+        if settings.appearance not in {"light", "dark"}:
+            settings.appearance = "light"
+        return settings
 
     def save(self, path: Path = SETTINGS_FILE) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
