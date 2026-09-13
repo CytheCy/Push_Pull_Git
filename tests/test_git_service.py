@@ -117,5 +117,62 @@ class PullTests(unittest.TestCase):
         self.assertFalse(any(command[0] == "pull" for command in runner.commands))
 
 
+class SyncTests(unittest.TestCase):
+    def make_runner(self, ahead: int, behind: int, changes: str = "") -> FakeRunner:
+        return FakeRunner({
+            ("symbolic-ref", "--short", "HEAD"): (0, "main\n", ""),
+            ("remote", "get-url", "origin"): (0, "git@github.com:me/repo.git\n", ""),
+            ("rev-list", "--left-right", "--count", "HEAD...origin/main"): (
+                0, f"{ahead}\t{behind}\n", ""
+            ),
+            ("status", "--porcelain=v1", "--untracked-files=all"): (0, changes, ""),
+        })
+
+    def test_clean_behind_repo_is_pulled(self) -> None:
+        runner = self.make_runner(ahead=0, behind=2)
+        result = GitService(logging.getLogger("test-sync-pull"), runner).sync_repository(
+            Path("/tmp/repo"), "Sync {date}"
+        )
+        self.assertEqual(result.status, "pulled")
+        self.assertIn(("fetch", "origin"), runner.commands)
+        self.assertIn(("pull", "--ff-only", "origin", "main"), runner.commands)
+        self.assertFalse(any(command[0] == "push" for command in runner.commands))
+
+    def test_clean_ahead_repo_is_pushed_without_new_commit(self) -> None:
+        runner = self.make_runner(ahead=1, behind=0)
+        result = GitService(logging.getLogger("test-sync-push"), runner).sync_repository(
+            Path("/tmp/repo"), "Sync {date}"
+        )
+        self.assertEqual(result.status, "pushed")
+        self.assertIn(("push", "origin", "HEAD:main"), runner.commands)
+        self.assertFalse(any(command[0] == "commit" for command in runner.commands))
+
+    def test_behind_repo_with_changes_is_pulled_committed_and_pushed(self) -> None:
+        runner = self.make_runner(ahead=0, behind=1, changes=" M file.txt\n")
+        result = GitService(logging.getLogger("test-sync-both"), runner).sync_repository(
+            Path("/tmp/repo"), "Sync {repo}"
+        )
+        self.assertEqual(result.status, "synced")
+        self.assertLess(
+            runner.commands.index(("pull", "--ff-only", "origin", "main")),
+            runner.commands.index(("commit", "-m", "Sync repo")),
+        )
+        self.assertIn(("push", "origin", "HEAD:main"), runner.commands)
+
+    def test_diverged_repo_fails_without_changing_it(self) -> None:
+        runner = self.make_runner(ahead=1, behind=1, changes=" M file.txt\n")
+        result = GitService(logging.getLogger("test-sync-diverged"), runner).sync_repository(
+            Path("/tmp/repo"), "Sync {date}"
+        )
+        self.assertEqual(result.status, "failed")
+        self.assertIn("diverged", result.detail)
+        self.assertFalse(
+            any(
+                command[0] in {"pull", "add", "commit", "push"}
+                for command in runner.commands
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

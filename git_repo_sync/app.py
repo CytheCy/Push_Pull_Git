@@ -154,10 +154,8 @@ class GitRepoSyncApp(tk.Tk):
 
         actions = ttk.Frame(container)
         actions.grid(row=4, column=0, columnspan=3, sticky="ew", pady=12)
-        self.push_button = ttk.Button(actions, text="Push selected", command=lambda: self._run("push"))
-        self.push_button.pack(side="left")
-        self.pull_button = ttk.Button(actions, text="Pull selected", command=lambda: self._run("pull"))
-        self.pull_button.pack(side="left", padx=8)
+        self.sync_button = ttk.Button(actions, text="Push / Pull selected", command=self._run)
+        self.sync_button.pack(side="left")
         ttk.Button(actions, text="Settings…", command=self._show_settings).pack(side="right")
 
         ttk.Label(container, textvariable=self.status_text).grid(
@@ -204,31 +202,32 @@ class GitRepoSyncApp(tk.Tk):
     def _clear_selection(self) -> None:
         self.repo_list.selection_clear(0, tk.END)
 
-    def _run(self, operation: str) -> None:
+    def _run(self) -> None:
         indices = self.repo_list.curselection()
         if not indices:
             messagebox.showinfo("Nothing selected", "Select at least one repository.", parent=self)
             return
         repositories = [self.repositories[index] for index in indices]
-        if operation == "push" and not messagebox.askyesno(
-            "Confirm push",
-            f"Stage, commit, and push changes in {len(repositories)} selected repositories?",
+        if not messagebox.askyesno(
+            "Confirm push / pull",
+            f"Synchronize {len(repositories)} selected repositories with origin?\n\n"
+            "This may pull updates or stage, commit, and push local changes as needed.",
             parent=self,
         ):
             return
         self._set_busy(True)
-        self._append_output(f"\n{operation.upper()} started for {len(repositories)} repositories…\n")
+        self._append_output(f"\nSYNC started for {len(repositories)} repositories…\n")
         thread = threading.Thread(
-            target=self._worker, args=(operation, repositories), daemon=True
+            target=self._worker, args=(repositories,), daemon=True
         )
         thread.start()
 
-    def _worker(self, operation: str, repositories: list[Path]) -> None:
+    def _worker(self, repositories: list[Path]) -> None:
         try:
             logger, log_file = create_logger(Path(self.settings.log_dir).expanduser())
             service = GitService(logger)
             results = service.run_many(
-                operation,
+                "sync",
                 repositories,
                 self.settings.commit_template,
                 callback=lambda result: self.events.put(("result", result)),
@@ -271,8 +270,7 @@ class GitRepoSyncApp(tk.Tk):
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         state = "disabled" if busy else "normal"
-        self.push_button.configure(state=state)
-        self.pull_button.configure(state=state)
+        self.sync_button.configure(state=state)
         if busy:
             self.status_text.set("Git operation in progress…")
 
