@@ -251,8 +251,9 @@ class GitRepoSyncApp(tk.Tk):
                     failures = sum(not result.successful for result in results)
                     self.status_text.set(
                         f"Finished: {len(results) - failures} succeeded, {failures} failed. "
-                        f"Log: {log_file}"
+                        f"Log: {log_file} FINISHED!"
                     )
+                    self._append_output("FINISHED!\n")
                     self._set_busy(False)
                 elif event == "fatal":
                     self._set_busy(False)
