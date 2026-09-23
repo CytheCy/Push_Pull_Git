@@ -26,13 +26,17 @@ class GitCommandError(RuntimeError):
 
 
 class GitService:
+    PRE_COMMIT_BUILD = ".git-repo-sync-build"
+
     def __init__(
         self,
         logger: logging.Logger,
         command_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        build_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     ) -> None:
         self.logger = logger
         self._command_runner = command_runner
+        self._build_runner = build_runner
 
     @staticmethod
     def discover_repositories(root: Path, recursive: bool = True) -> list[Path]:
@@ -71,6 +75,7 @@ class GitService:
                     f"origin is not an SSH URL ({remote}). Configure an SSH origin first."
                 )
             branch = self._current_branch(repo)
+            self._run_pre_commit_build(repo)
             changes = self._git(repo, "status", "--porcelain=v1", "--untracked-files=all")
             if not changes.strip():
                 detail = "No local changes; nothing was committed or pushed."
@@ -142,6 +147,7 @@ class GitService:
                 self._git(repo, "pull", "--ff-only", "origin", branch)
                 pulled = True
 
+            self._run_pre_commit_build(repo)
             changes = self._git(repo, "status", "--porcelain=v1", "--untracked-files=all")
             if (ahead or changes.strip()) and not self._is_ssh_url(remote):
                 raise GitCommandError(
@@ -211,6 +217,31 @@ class GitService:
         if not branch:
             raise GitCommandError("HEAD is detached; check out a branch first.")
         return branch
+
+    def _run_pre_commit_build(self, repo: Path) -> None:
+        build_script = repo / self.PRE_COMMIT_BUILD
+        if not build_script.is_file():
+            return
+        if not os.access(build_script, os.X_OK):
+            raise GitCommandError(
+                f"Pre-commit build is not executable: {build_script.name}"
+            )
+        self.logger.info("BUILDING %s - Running %s", repo, build_script.name)
+        try:
+            completed = self._build_runner(
+                [str(build_script)],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise GitCommandError(f"Pre-commit build failed: {exc}") from exc
+        if completed.returncode != 0:
+            output = (completed.stderr or completed.stdout or "Unknown build error").strip()
+            raise GitCommandError(f"Pre-commit build failed: {output}")
+        self.logger.info("BUILT %s - %s completed successfully", repo, build_script.name)
 
     def _git(self, repo: Path, *arguments: str) -> str:
         command: Sequence[str] = ("git", "-C", str(repo), *arguments)

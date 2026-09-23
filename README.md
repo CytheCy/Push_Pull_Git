@@ -8,6 +8,7 @@ A small Python/Tkinter desktop app for synchronizing a selected group of Git rep
 - Lets you select all, some, or none of the discovered repositories.
 - **Push / Pull selected** fetches each repository and chooses what it needs: a fast-forward-only pull, a push, or both.
 - Working-tree changes are staged and committed with a dated message before they are pushed. Existing unpushed commits are detected too.
+- A repository can opt into a pre-commit build by providing an executable `.git-repo-sync-build` script at its root. The build runs after pulling and before changes are staged; a failed build stops that repository's sync.
 - Records every result in a dated log file and displays results in the app.
 - Requires an SSH `origin` for pushes, such as `git@github.com:owner/project.git`.
 
@@ -34,6 +35,18 @@ Use **Settings… → Appearance** to switch between the light and dark themes. 
 saved for future sessions.
 
 The commit template supports `{date}` (local date, time, and UTC offset), `{day}` (`YYYY-MM-DD`), and `{repo}` (folder name).
+
+## Repository-specific builds
+
+Add an executable `.git-repo-sync-build` script to a repository when generated files must be refreshed before each commit. For example:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+hugo --quiet
+```
+
+Repositories without this file continue to sync without running a build.
 
 ## Test
 

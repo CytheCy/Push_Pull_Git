@@ -22,6 +22,17 @@ class FakeRunner:
         return subprocess.CompletedProcess(command, code, stdout, stderr)
 
 
+class FakeBuildRunner:
+    def __init__(self, returncode: int = 0, stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stderr = stderr
+        self.commands: list[tuple[list[str], dict]] = []
+
+    def __call__(self, command, **kwargs):
+        self.commands.append((command, kwargs))
+        return subprocess.CompletedProcess(command, self.returncode, "", self.stderr)
+
+
 class DiscoveryTests(unittest.TestCase):
     def test_discovers_nested_repositories_without_descending_into_them(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -172,6 +183,59 @@ class SyncTests(unittest.TestCase):
                 for command in runner.commands
             )
         )
+
+    def test_repo_build_runs_before_status_and_generated_files_are_committed(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            repo = Path(folder)
+            build_script = repo / GitService.PRE_COMMIT_BUILD
+            build_script.touch(mode=0o755)
+            runner = self.make_runner(ahead=0, behind=0, changes=" M read/index.html\n")
+            build_runner = FakeBuildRunner()
+            service = GitService(
+                logging.getLogger("test-sync-build"), runner, build_runner
+            )
+
+            result = service.sync_repository(repo, "Sync {repo}")
+
+            self.assertEqual(result.status, "pushed")
+            self.assertEqual(build_runner.commands[0][0], [str(build_script)])
+            self.assertEqual(build_runner.commands[0][1]["cwd"], repo)
+            self.assertIn(("add", "--all"), runner.commands)
+            self.assertLess(
+                runner.commands.index(("status", "--porcelain=v1", "--untracked-files=all")),
+                runner.commands.index(("add", "--all")),
+            )
+
+    def test_repo_build_failure_aborts_commit_and_push(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            repo = Path(folder)
+            (repo / GitService.PRE_COMMIT_BUILD).touch(mode=0o755)
+            runner = self.make_runner(ahead=0, behind=0, changes=" M file.txt\n")
+            service = GitService(
+                logging.getLogger("test-sync-build-failure"),
+                runner,
+                FakeBuildRunner(returncode=1, stderr="Hugo failed"),
+            )
+
+            result = service.sync_repository(repo, "Sync {repo}")
+
+            self.assertEqual(result.status, "failed")
+            self.assertIn("Hugo failed", result.detail)
+            self.assertFalse(
+                any(command[0] in {"status", "add", "commit", "push"} for command in runner.commands)
+            )
+
+    def test_repo_without_build_hook_skips_build(self) -> None:
+        runner = self.make_runner(ahead=0, behind=0)
+        build_runner = FakeBuildRunner()
+        service = GitService(
+            logging.getLogger("test-sync-no-build"), runner, build_runner
+        )
+
+        result = service.sync_repository(Path("/tmp/repo"), "Sync {repo}")
+
+        self.assertEqual(result.status, "unchanged")
+        self.assertEqual(build_runner.commands, [])
 
 
 if __name__ == "__main__":
